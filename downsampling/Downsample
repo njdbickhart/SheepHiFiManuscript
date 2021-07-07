@@ -1,0 +1,524 @@
+import os
+import re
+import subprocess
+from collections import defaultdict
+
+# The following is a cluster-environment specific change
+shell.executable("/usr/bin/bash")
+# Wildcards: {sample} {assembly_group}
+BINS = ["bin3c"]
+
+config = {
+"logdir" : "/lustre/project/rumen_longread_metagenome_assembly/analysis/sheep/logs",
+"diamonddb" : "/lustre/project/rumen_longread_metagenome_assembly/assemblies/protists/uniprot_ref_proteomes.diamond.dmnd",
+"diamondtaxid" : "/lustre/project/rumen_longread_metagenome_assembly/assemblies/protists/uniprot_ref_proteomes.taxids",
+"ncbidb" : "/project/rumen_longread_metagenome_assembly/assemblies/protists/blob_ncbi.db",
+"checkm_dataroot": "/lustre//project/forage_assemblies/sheep_project/pipeline_test/checkmdb",
+"sourmash_gbk" : "/lustre/project/forage_assemblies/sheep_project/pipeline_test/sourdb/genbank-d2-k31.sbt.json",
+"assemblies" : [
+"/lustre/project/rumen_longread_metagenome_assembly/analysis/sheep/links/asm10.fa",
+"/lustre/project/rumen_longread_metagenome_assembly/analysis/sheep/links/asm20.fa",
+"/lustre/project/rumen_longread_metagenome_assembly/analysis/sheep/links/asm30.fa",
+"/lustre/project/rumen_longread_metagenome_assembly/analysis/sheep/links/asm40.fa",
+"/lustre/project/rumen_longread_metagenome_assembly/analysis/sheep/links/asm50.fa",
+"/lustre/project/rumen_longread_metagenome_assembly/analysis/sheep/links/asm60.fa",
+"/lustre/project/rumen_longread_metagenome_assembly/analysis/sheep/links/asm70.fa",
+"/lustre/project/rumen_longread_metagenome_assembly/analysis/sheep/links/asm80.fa",
+"/lustre/project/rumen_longread_metagenome_assembly/analysis/sheep/links/asm90.fa"
+],
+"samples" : {
+"Lib101_L1" : [
+      "/lustre/project/rumen_longread_metagenome_assembly/sheep_poop/illumina_wgs/LIB101996_S4_L001_R1_001.fastq.gz",
+      "/lustre/project/rumen_longread_metagenome_assembly/sheep_poop/illumina_wgs/LIB101996_S4_L001_R2_001.fastq.gz"
+    ]
+},
+"hifi" : "/lustre/project/rumen_longread_metagenome_assembly/sheep_poop/sheep_poop_sequel_combined_CCS.fasta.gz",
+"bin3c" : "/lustre/project/forage_assemblies/sheep_project/bin3C/bin3C.py",
+"blobtools" : "/lustre/project/forage_assemblies/sheep_project/blobtools/blobtools",
+"hic" : {
+"Sau3AI" : [
+  "/lustre/project/rumen_longread_metagenome_assembly/sheep_poop/hic_data/Smith_Sheep_63_HC_S2_L001_R1_001.fastq.gz",
+  "/lustre/project/rumen_longread_metagenome_assembly/sheep_poop/hic_data/Smith_Sheep_63_HC_S2_L001_R2_001.fastq.gz"
+]
+}
+}
+
+os.makedirs(config['logdir'], exist_ok=True)
+os.makedirs(config['logdir'] + "/bwa", exist_ok=True)
+os.makedirs("assembly", exist_ok=True)
+
+def getAssemblyBaseName(files):
+    return [re.sub('\.fa.{0,3}', '', os.path.basename(x)) for x in files]
+
+
+localrules: link_assemblies, modify_bin3c, separate_contigs, cov_by_comp_table
+
+wildcard_constraints:
+    assembly_group = "asm\d{2}",
+    samples = "Lib101_L\d{1}"
+
+rule all:
+    input:
+        #expand("mash/{assembly_group}.msh", assembly_group=getAssemblyBaseName(config["assemblies"])),
+        "figures/bin_facet_cov_by_comp_scatter.pdf",
+        "figures/bin_top80_cov_by_comp.pdf",
+        "figures/bin_ridge_top95_coverage.pdf",
+        "figures/contig_facet_cov_by_comp_scatter.pdf",
+        "figures/contig_top80_cov_by_comp.pdf",
+        "figures/contig_ridge_top95_coverage.pdf"
+
+# Take configuration assemblies and softlink them
+rule link_assemblies:
+    input:
+        config["assemblies"]
+    output:
+        "assembly/{assembly_group}.fa"
+    run:
+        for i in input:
+            cmd = ["ln", "-s", i, "assembly/" + re.sub('\.fa.{0,3}', '', os.path.basename(i)) + ".fa"]
+            subprocess.call(cmd)
+
+rule bwa_index:
+    input:
+        "assembly/{assembly_group}.fa"
+    output:
+        "assembly/{assembly_group}.fa.amb",
+        "assembly/{assembly_group}.fa.ann",
+        "assembly/{assembly_group}.fa.bwt",
+        "assembly/{assembly_group}.fa.pac",
+        "assembly/{assembly_group}.fa.sa",
+        "assembly/{assembly_group}.fa.fai"
+    log:
+        config['logdir'] + "/{assembly_group}.index.log"
+    conda:
+        "envs/overall.yaml"
+    shell:
+        """
+        bwa index {input} 2> {log}
+        samtools faidx {input} 2> {log}
+        """
+
+rule bwa_mem:
+    input:
+        amb = "assembly/{assembly_group}.fa.amb",
+        ann = "assembly/{assembly_group}.fa.ann",
+        bwt = "assembly/{assembly_group}.fa.bwt",
+        pac = "assembly/{assembly_group}.fa.pac",
+        sa = "assembly/{assembly_group}.fa.sa",
+        reference = "assembly/{assembly_group}.fa",
+        r1 = lambda wildcards: config["samples"][wildcards.sample][0],
+        r2 = lambda wildcards: config["samples"][wildcards.sample][1],
+    output:
+        "mapping/{assembly_group}/{sample}.bam"
+    log:
+        config['logdir'] + "/bwa/{assembly_group}_{sample}.log"
+    params:
+        extra="",
+        #pipe_cmd = "samtools sort -o {output} -",
+        threads = 8
+    conda:
+        "envs/overall.yaml"
+    shell:
+        """
+        bwa mem -t {params.threads} {params.extra} {input.reference} {input.r1} {input.r2} | samtools sort -o {output} - >> {log} 2>&1
+        """
+
+rule ccs_align:
+    input:
+        reference = "assembly/{assembly_group}.fa",
+        reads = config["hifi"]
+    output:
+        "mapping/{assembly_group}.ccs.bam"
+    params:
+        temp = "mapping/{assembly_group}.tmp"
+    threads: 4
+    conda:
+        "envs/overall.yaml"
+    shell:
+        """
+        minimap2 -ax asm20 -R '@RG\tID:CCS\tSM:CCS' {input.reference} {input.reads} | samtools sort -T {params.temp} -o {output} -
+        samtools index {output}
+        """
+
+rule create_bam_index:
+    input:
+        "mapping/{assembly_group}/{file}.bam"
+    output:
+        "mapping/{assembly_group}/{file}.bam.bai"
+    threads:
+        1
+    conda:
+        "envs/overall.yaml"
+    shell:
+        "samtools index {input}"
+
+rule align_hic:
+    input:
+        amb = "assembly/{assembly_group}.fa.amb",
+        ann = "assembly/{assembly_group}.fa.ann",
+        bwt = "assembly/{assembly_group}.fa.bwt",
+        pac = "assembly/{assembly_group}.fa.pac",
+        sa = "assembly/{assembly_group}.fa.sa",
+        reference = "assembly/{assembly_group}.fa",
+        r1 = lambda wildcards: config["hic"][wildcards.enzyme][0],
+        r2 = lambda wildcards: config["hic"][wildcards.enzyme][1]
+    output:
+        "mapping/{assembly_group}/hic/hic_{enzyme}.bam"
+    threads: 8
+    conda:
+        "envs/overall.yaml"
+    log:
+        config['logdir'] + "/{assembly_group}_{enzyme}.hic.log"
+    shell:
+        """
+        bwa mem -t {threads} -5SP {input.reference} {input.r1} {input.r2} | \
+        samtools view -F 0x904 -bS - | \
+        samtools sort -o {output} -n - 2> {log}
+        """
+
+rule bin3c_contact:
+    input:
+        reference = "assembly/{assembly_group}.fa",
+        bam = "mapping/{assembly_group}/hic/hic_{enzyme}.bam"
+    output:
+        directory("binning/bin3c/{assembly_group}/{enzyme}_full_out")
+    threads: 1
+    conda:
+        "envs/bin3c.yaml"
+    params:
+        enzyme = lambda wildcards: wildcards.enzyme,
+        bin3c = config["bin3c"]
+    shell:
+        """
+        {params.bin3c} mkmap -e {params.enzyme} -v {input.reference} {input.bam} {output}
+        """
+
+
+rule bin3c_cluster:
+    input:
+        "binning/bin3c/{assembly_group}/{enzyme}_full_out"
+    output:
+        outclust = "binning/bin3c/{assembly_group}/{enzyme}_full_clust/clustering.mcl"
+    threads: 1
+    params:
+        outfolder = "binning/bin3c/{assembly_group}/{enzyme}_full_temp",
+        realout = "binning/bin3c/{assembly_group}/{enzyme}_full_clust",
+        bin3c = config["bin3c"]
+    conda:
+        "envs/bin3c.yaml"
+    shell:
+        """
+        python2 {params.bin3c} cluster --no-plot -v {input}/contact_map.p.gz {params.outfolder}
+        mv {params.outfolder}/clustering.mcl {params.realout}/
+        rm -r {params.outfolder}
+        """
+
+rule modify_bin3c:
+    input:
+        expand("binning/bin3c/{{assembly_group}}/{enzyme}_full_clust/clustering.mcl", enzyme=config["hic"])
+    output:
+        "binning/bin3c/{assembly_group}/bin3c.full.clusters.tab"
+    run:
+        with open(output[0], 'w') as out:
+            seen = set()
+            bnum = 0
+            for j in input:
+                with open(j, 'r') as bins:
+                    for l in bins:
+                        s = l.rstrip().split()
+                        for i in s:
+                            if not i in seen:
+                                out.write(f'{i}\tbin3c.{bnum}\n')
+                            seen.add(i)
+                        bnum += 1
+
+rule das_tool:
+    input:
+        binfiles = expand("binning/{bins}/{{assembly_group}}/{bins}.full.clusters.tab", bins=BINS),
+        reference = "assembly/{assembly_group}.fa"
+    output:
+        expand("binning/DASTool/{{assembly_group}}.full{postfix}",
+               postfix=["_DASTool_summary.txt", "_DASTool_hqBins.pdf", "_DASTool_scores.pdf"]),
+        expand("binning/DASTool/{{assembly_group}}.full_{bins}.eval",
+               bins= BINS),
+        "binning/DASTool/{assembly_group}.full_proteins.faa.archaea.scg",
+        "binning/DASTool/{assembly_group}.full_proteins.faa.bacteria.scg",
+        cluster_attribution = "binning/DASTool/{assembly_group}.full_cluster_attribution.tsv"
+    threads: 10
+    log:
+        config['logdir'] + "/dastool.{assembly_group}.full.log"
+    params:
+        binnames = ",".join(BINS),
+        scaffolds2bin = lambda wildcards, input: ",".join(input.binfiles),
+        output_prefix = "binning/DASTool/{assembly_group}.full"
+    conda:
+        "envs/dastool.yaml"
+    shell:
+        """
+        module load usearch/11.0.667
+        echo {params.output_prefix} {params.scaffolds2bin} {params.binnames}
+        DAS_Tool --outputbasename {params.output_prefix} --bins {params.scaffolds2bin} \
+        --labels {params.binnames} --contigs {input.reference} --search_engine diamond \
+        --write_bin_evals 1 --create_plots 1 --threads {threads} --debug &> {log};
+        mv {params.output_prefix}_DASTool_scaffolds2bin.txt {output.cluster_attribution} &>> {log}
+        """
+
+rule get_scg_tables:
+    input:
+        arch = "binning/DASTool/{assembly_group}.full_proteins.faa.archaea.scg",
+        bact = "binning/DASTool/{assembly_group}.full_proteins.faa.bacteria.scg"
+    output:
+        short= "binning/{assembly_group}.scg_proteins.shortform.tab",
+        bed = "binning/{assembly_group}.scg_proteins.scg.bed"
+    shell:
+        """
+        cat {input.arch} {input.bact} | grep '>' | perl -e '@ids = ("ID", "partial", "start_type", "rbs_motif", "rbs_spacer", "gc_cont"); print "ContigID\tStart\tEnd\tOrient\t" . join("\t", @ids) . "\n"; while(<STDIN>){chomp; $_ =~ s/\>//g; @lsegs = split(/\s*\#\s*/); @bsegs = split(/\;/, $lsegs[-1]); print "$lsegs[0]\t$lsegs[1]\t$lsegs[2]\t$lsegs[3]"; foreach my $k (@bsegs){$k =~ s/^.+\=//; print "\t$k";} print "\n";}' >  {output.short}
+        cat {output.short} | perl -lane '$r = $F[0]; $r  =~ s/_\d{1,3}$//; print "$r\t$F[1]\t$F[2]\t$F[0]";' > {output.bed}
+        """
+
+
+rule diamond:
+    input:
+        "assembly/{assembly_group}.fa"
+    output:
+        "blobtools/{assembly_group}.diamondout.tsv"
+    threads: 72
+    params:
+        db = config['diamonddb']
+    conda:
+        "envs/overall.yaml"
+    shell:
+        """
+        diamond blastx --query {input} --db {params.db} --threads {threads} --outfmt 6 --sensitive --max-target-seqs 1 --evalue 1e-25 -o {output}
+        """
+
+rule blobtools_taxify:
+    input:
+        "blobtools/{assembly_group}.diamondout.tsv"
+    output:
+        "blobtools/taxify.{assembly_group}.diamondout.tsv.taxified.out"
+    threads: 2
+    params:
+        tax = config['diamondtaxid'],
+        blobtools = config['blobtools'],
+        outbase = "blobtools/taxify"
+    conda:
+        "envs/overall.yaml"
+    shell:
+        """
+        {params.blobtools} taxify -f {input} -m {params.tax} -s 0 -t 2 -o {params.outbase}
+        """
+
+rule blobtools_cov:
+    input:
+        bams = "mapping/{assembly_group}/{sample}.bam",
+        bais = "mapping/{assembly_group}/{sample}.bam.bai",
+        fasta = "assembly/{assembly_group}.fa"
+    output:
+        cov = "blobtools/{assembly_group}.{sample}.bam.cov"
+    params:
+        outbase = "blobtools/{assembly_group}",
+        blobtools = config['blobtools']
+    conda:
+        "envs/overall.yaml"
+    shell:
+        """
+        {params.blobtools} map2cov -i {input.fasta} -b {input.bams} -o {params.outbase}
+        """
+
+def getCovStr(covs):
+    return "-c " + " -c ".join(covs)
+
+rule blobtools_create:
+    input:
+        contigs = "assembly/{assembly_group}.fa",
+        covs = expand("blobtools/{{assembly_group}}.{sample}.bam.cov",  sample=config["samples"]),
+        tax = "blobtools/taxify.{assembly_group}.diamondout.tsv.taxified.out"
+    output:
+        blobdb = "blobtools/{assembly_group}.blobDB.json"
+    params:
+        cstr = getCovStr(expand("blobtools/{{assembly_group}}.{sample}.bam.cov",  sample=config["samples"])),
+        outpre = "blobtools/{assembly_group}",
+        db = config["ncbidb"],
+        blobtools = config['blobtools']
+    conda:
+        "envs/overall.yaml"
+    shell:
+        """
+        echo "using {params.cstr}"
+        {params.blobtools} create -i {input.contigs} {params.cstr} -t {input.tax} -o {params.outpre} --db {params.db}
+        """
+
+rule blobtools_viewplot:
+    input:
+        blobdb = "blobtools/{assembly_group}.blobDB.json"
+    output:
+        #supplot = "blobtools/supkingdom.{assembly_group}.blobDB.json.bestsum.superkingdom.p8.span.100.blobplot.covsum.pdf",
+        #phylumplot = "blobtools/phylum.{assembly_group}.blobDB.json.bestsum.phylum.p8.span.100.blobplot.covsum.pdf",
+        table = "blobtools/table.{assembly_group}.blobDB.table.txt"
+    params:
+        blobtools = config['blobtools']
+    conda:
+        "envs/overall.yaml"
+    shell:
+        """
+        {params.blobtools} plot -i {input.blobdb} --notitle --format pdf -r superkingdom -o blobtools/supkingdom
+        {params.blobtools} plot -i {input.blobdb} --notitle --format pdf -r phylum -o blobtools/phylum
+
+        {params.blobtools} view -i {input.blobdb} -o blobtools/table -r all
+        """
+
+def interlace(input):
+    v = list()
+    for i in input.crops:
+        m = re.search(r'blobtools/table.(.+).lens.tab', i)
+        v.append(m.group(1))
+        v.append(i)
+    return ' '.join(v)
+
+rule blobview_plot:
+    input:
+        crops = expand("blobtools/table.{assembly_group}.lens.tab", assembly_group=getAssemblyBaseName(config["assemblies"]))
+    output:
+        plot = "figures/summary_taxonomic_plot.pdf"
+    params:
+        interlaced = lambda wildcards, input : interlace(input),
+        script = workflow.basedir + "/scripts/gcSupKingPlot.R"
+    conda:
+        "envs/rlibs.yaml"
+    shell:
+        """
+        Rscript {params.script} {params.interlaced}
+        """
+
+rule separate_contigs:
+    input:
+        "assembly/{assembly_group}.fa",
+        "assembly/{assembly_group}.fa.fai"
+    output:
+        directory("assembly/{assembly_group}/")
+    run:
+        os.makedirs(output[0], exist_ok=True)
+        chrs = dict()
+        count = 0
+        with open(input[1], 'r') as fai:
+            count = 0
+            for l in fai:
+                s = l.rstrip().split()
+                chrs[s[0]] = int(s[1])
+        chrs = {k: v for k, v in sorted(chrs.items(), reverse=True, key=lambda item: item[1])}
+        for k in chrs.keys():
+            shell(f'samtools faidx {input[0]} {k} > {output[0]}/{k}.fasta')
+            count += 1
+            if count >= 1000:
+                break
+
+rule checkm_contigs:
+    input:
+        "assembly/{assembly_group}/"
+    output:
+        table = protected("tables/{assembly_group}.contigs.checkm.txt"),
+        directory = directory("contigs_checkm/{assembly_group}")
+    threads: 8
+    conda:
+        "envs/overall.yaml"
+    log:
+        config['logdir'] + "/checkm_{assembly_group}_stdout.log"
+    shell:
+        """
+        checkm lineage_wf -f {output.table} -t {threads} -x fasta {input} {output.directory} 2> {log}
+        """
+
+rule cov_by_comp_table:
+    input:
+        table = "blobtools/table.{assembly_group}.blobDB.table.txt",
+        checkm = "tables/{assembly_group}.contigs.checkm.txt"
+    output:
+        comp = "tables/{assembly_group}.ctg_cov_by_comp.tab"
+    params:
+        asm = '{assembly_group}'
+    run:
+        ctglookup = defaultdict(dict)
+        with open(input["checkm"], 'r') as check:
+            for x in range(3):
+                l = check.readline()
+            for l in check:
+                s = l.rstrip().split()
+                if s[0].startswith('-') or len(s) < 5:
+                    continue
+                ctglookup[s[0]]["Comp"] = s[-3]
+                ctglookup[s[0]]["Cont"] = s[-2]
+        with open(output["comp"], 'w') as out, open(input["table"], 'r') as blob:
+            out.write(f'Contig\tCoverage\tCompleteness\tContamination\tAssembly\n')
+            # find column indexes
+            covidx = 0
+            for l in blob:
+                if l.startswith('##'):
+                    continue
+                if l.startswith('#'):
+                    s = l.rstrip().split('\t')
+                    for i, x in enumerate(s):
+                        if x == "cov_sum" or x == "cov0":
+                            covidx = i
+                s = l.rstrip().split('\t')
+                if s[0] in ctglookup:
+                    out.write(f'{s[0]}\t{s[covidx]}\t{ctglookup[s[0]]["Comp"]}\t{ctglookup[s[0]]["Cont"]}\t{params["asm"]}\n')
+
+def ctg_interlace(input):
+    v = list()
+    for i in input.comp:
+        m = re.search(r'tables/(.+).(.{3})_cov_by_comp.tab', i)
+        v.append(m.group(1))
+        v.append(i)
+    return ' '.join(v)
+
+rule contig_cov_by_comp_plot:
+    input:
+        comp = expand("tables/{assembly_group}.ctg_cov_by_comp.tab", assembly_group=getAssemblyBaseName(config["assemblies"]))
+    output:
+        "figures/contig_facet_cov_by_comp_scatter.pdf",
+        "figures/contig_top80_cov_by_comp.pdf",
+        "figures/contig_ridge_top95_coverage.pdf"
+    params:
+        interlaced = lambda wildcards, input : ctg_interlace(input),
+        script = workflow.basedir + "/scripts/CovByCompPlot.R"
+    conda:
+        "envs/rlibs.yaml"
+    shell:
+        """
+        Rscript {params.script} contig {params.interlaced}
+        """
+
+rule binCovCompTable:
+    input:
+        scaffs = "binning/DASTool/{assembly_group}.full_cluster_attribution.tsv",
+        comp = "binning/DASTool/{assembly_group}.full_DASTool_summary.txt",
+        blob = "blobtools/table.{assembly_group}.blobDB.table.txt"
+    output:
+        "tables/{assembly_group}.bin_cov_by_comp.tab"
+    params:
+        asm = "{assembly_group}",
+        script = workflow.basedir + "/scripts/create_bin_coverage_table.py"
+    conda:
+        "envs/overall.yaml"
+    shell:
+        """
+        python3 {params.script} {params.asm} {input.scaffs} {input.blob} {input.comp} {output}
+        """
+
+rule binCovPlot:
+    input:
+        comp = expand("tables/{assembly_group}.bin_cov_by_comp.tab", assembly_group=getAssemblyBaseName(config["assemblies"]))
+    output:
+        "figures/bin_facet_cov_by_comp_scatter.pdf",
+        "figures/bin_top80_cov_by_comp.pdf",
+        "figures/bin_ridge_top95_coverage.pdf"
+    params:
+        interlaced = lambda wildcards, input : ctg_interlace(input),
+        script = workflow.basedir + "/scripts/CovByCompPlot.R"
+    conda:
+        "envs/rlibs.yaml"
+    shell:
+        """
+        Rscript {params.script} bin {params.interlaced}
+        """

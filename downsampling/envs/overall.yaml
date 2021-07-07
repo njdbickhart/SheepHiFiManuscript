@@ -1,0 +1,19 @@
+channels:
+    - anaconda
+    - bioconda
+    - conda-forge
+dependencies:
+    - diamond=0.9.30
+    - samtools=1.9
+    - bwa=0.7.17
+    - docopt
+    - tqdm
+    - pyyaml
+    - git
+    - pysam
+    - numpy
+    - matplotlib
+    - perl-bioperl
+    - prodigal
+    - checkm-genome
+    - minimap2

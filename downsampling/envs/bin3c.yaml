@@ -1,0 +1,21 @@
+channels:
+    - anaconda
+    - bioconda
+dependencies:
+    - python=2.7
+    - samtools=1.9
+    - pip=19.0.1
+    - biopython
+    - matplotlib
+    - networkx<2
+    - numba<0.44
+    - numpy<1.15.0
+    - pandas
+    - pysam
+    - python-louvain
+    - pyyaml
+    - scipy
+    - seaborn
+    - sparse
+    - tqdm
+    - typing

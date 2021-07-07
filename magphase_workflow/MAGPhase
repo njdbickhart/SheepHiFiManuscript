@@ -1,0 +1,111 @@
+import os
+import re
+import subprocess
+from collections import defaultdict
+
+os.makedirs("logs", exist_ok=True)
+
+configfile : "default.json"
+
+fullassembly = config["assembly"]
+magphaseloc = "/lustre/project/rumen_longread_metagenome_assembly/binaries/cDNA_Cupcake/"
+reads = "/lustre/project/rumen_longread_metagenome_assembly/assemblies/sheep/downsample.90.fasta"
+
+wildcard_constraints:
+    ext = "(fa|fna|fasta)"
+
+ASM, EXT, = glob_wildcards("mags/{asm}.{ext}")
+
+rule all:
+    input:
+        "consolidate/consolidated.short",
+        "consolidate/consolidated.long"
+
+rule alignHiFi:
+    input:
+        mag = fullassembly
+    output:
+        bam = "mapping/assembly.bam",
+        bai = "mapping/assembly.bam.bai"
+    threads: 8
+    log:
+        "logs/alignHiFi.out"
+    params:
+        setting = "asm20",
+        temp = "assembly.temp",
+        reads = reads
+    shell:
+        """
+        minimap2 -t {threads} -ax {params.setting} {input.mag} {params.reads} | samtools sort -T {params.temp} -o {output.bam} -  2> {log}
+        samtools index {output.bam} 2>> {log}
+        """
+
+rule filterBam:
+    input:
+        bam = "mapping/assembly.bam"
+    output:
+        filtered = "mapping/assembly.filtered.bam",
+        filtidx = "mapping/assembly.filtered.bam.bai"
+    log:
+        "logs/filterBam.out"
+    params:
+        script = magphaseloc + "sequence/filter_bam_by_coverage.py",
+        cov = "0.9",
+        secondary = "--filter_secondary --filter_supp"
+    shell:
+        """
+        python {params.script} -c {params.cov} {params.secondary} {input.bam} {output.filtered} 2> {log}
+        samtools index {output.filtered} 2>> {log}
+        """
+
+
+rule MAGPhase:
+    input:
+        mag = "mags/{asm}.{ext}",
+        bam = "mapping/assembly.filtered.bam",
+        bed = "beds/{asm}.bed"
+    output:
+        hap = "phase/{asm}/{asm}.{ext}.human_readable_by_hap.txt",
+        pos = "phase/{asm}/{asm}.{ext}.human_readable_by_pos.txt",
+        read = "phase/{asm}/{asm}.{ext}.human_readable_by_read.txt"
+    log:
+        "logs/{asm}/MAGPhase.{asm}.{ext}.out"
+    params:
+        bhFDR = "0.01",
+        outname = "phase/{asm}/{asm}.{ext}",
+        script = magphaseloc + "phasing/mag_phaser.py"
+    shell:
+        """
+        python {params.script} --bhFDR {params.bhFDR} -a {input.mag} -b {input.bam} -g {input.bed} -o {params.outname} 2> {log}
+        """
+
+rule MergeMAGPhase:
+    input:
+        hap = "phase/{asm}/{asm}.{ext}.human_readable_by_hap.txt",
+        pos = "phase/{asm}/{asm}.{ext}.human_readable_by_pos.txt"
+    output:
+        short = "consolidate/{asm}/{asm}.{ext}.short",
+        long = "consolidate/{asm}/{asm}.{ext}.long"
+    log:
+        "logs/{asm}/MergeMAGPhase.{asm}.{ext}.out"
+    params:
+        folder = "phase/{asm}/",
+        prefix = "{asm}.{ext}",
+        outprefix = "consolidate/{asm}/{asm}.{ext}"
+    shell:
+        """
+        python {workflow.basedir}/scripts/calcMagPhaseOutputVals.py -f {params.folder} -p {params.prefix} -o {params.outprefix} 2> {log}
+        """
+
+rule ConsolidateMAGPhase:
+    input:
+        expand("consolidate/{asm}/{asm}.{ext}.short", asm = ASM, ext=EXT),
+        expand("consolidate/{asm}/{asm}.{ext}.long", asm= ASM, ext=EXT)
+    output:
+        short = "consolidate/consolidated.short",
+        long  = "consolidate/consolidated.long"
+    shell:
+        """
+        cat consolidate/*/*.short > {output.short}
+        cat consolidate/*/*.long > {output.long}
+        """
