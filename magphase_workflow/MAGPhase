@@ -8,8 +8,11 @@ os.makedirs("logs", exist_ok=True)
 configfile : "default.json"
 
 fullassembly = config["assembly"]
-magphaseloc = "/lustre/project/rumen_longread_metagenome_assembly/binaries/cDNA_Cupcake/"
-reads = "/lustre/project/rumen_longread_metagenome_assembly/assemblies/sheep/downsample.90.fasta"
+magphaseloc = config["magphase"]
+reads = config["hifireads"]
+
+
+localrules: ConsolidateMAGPhase
 
 wildcard_constraints:
     ext = "(fa|fna|fasta)"
@@ -99,8 +102,8 @@ rule MergeMAGPhase:
 
 rule ConsolidateMAGPhase:
     input:
-        expand("consolidate/{asm}/{asm}.{ext}.short", asm = ASM, ext=EXT),
-        expand("consolidate/{asm}/{asm}.{ext}.long", asm= ASM, ext=EXT)
+        expand("consolidate/{asm}/{asm}.{ext}.short", asm=ASM, ext=EXT),
+        expand("consolidate/{asm}/{asm}.{ext}.long", asm=ASM, ext=EXT)
     output:
         short = "consolidate/consolidated.short",
         long  = "consolidate/consolidated.long"

@@ -1,0 +1,26 @@
+{
+  "__default__":
+  {
+    "threads" : "1",
+    "mem" : "10000",
+    "stdout" : "logs/{rule}.stdout",
+    "jobname" : "{rule}"
+  },
+  
+  "alignHiFi":
+  {
+    "threads" : "{threads}",
+    "mem" : "40000"
+  },
+  
+  "MAGPhase":
+  {
+    "mem" : "40000",
+    "stdout" : "logs/{rule}.{wildcards.asm}.{wildcards.ext}.stdout",
+  },
+  
+  "MergeMAGPhase":
+  {
+    "stdout" : "logs/{rule}.{wildcards.asm}.{wildcards.ext}.stdout"
+  }
+}

@@ -1,0 +1,5 @@
+{
+"assembly" : "/path/to/the/full/assembly.fasta",
+"magphase" : "/path/to/the/directory/for/cDNA_cupcake/",
+"hifireads" : "/path/to/your/hifi/reads.fasta"
+}
