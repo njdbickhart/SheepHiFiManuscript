@@ -2,6 +2,7 @@ channels:
     - anaconda
     - bioconda
     - conda-forge
+    - r
 dependencies:
     - diamond=0.9.30
     - samtools=1.9
@@ -17,3 +18,11 @@ dependencies:
     - prodigal
     - checkm-genome
     - minimap2
+    - bcbiogff
+    - biopython
+    - bx-python
+    - numpy
+    - psutil
+    - pybedtools
+    - pyvcf
+    - scipy

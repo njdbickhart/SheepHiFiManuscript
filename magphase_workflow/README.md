@@ -5,7 +5,7 @@ This is a collection of useful scripts and a snakemake workflow designed to auto
 
 ## MAGPhase 
 
-This is a snakemake workflow designed to run the mag_phaser.py script that is part of the [cDNA_cupcake](https://github.com/Magdoll/cDNA_Cupcake) repository. The workflow will align HiFi reads to your assembly, phase the reads within target single copy gene regions, estimate the number of haplotypes and then generate tabular output summaries for each MAG. 
+This is a snakemake workflow designed to run the mag_phaser.py script that is part of the [MAGPhase](https://github.com/Magdoll/MagPhase) repository. The workflow will align HiFi reads to your assembly, phase the reads within target single copy gene regions, estimate the number of haplotypes and then generate tabular output summaries for each MAG. 
 
 ---
 
@@ -16,7 +16,7 @@ This is a snakemake workflow designed to run the mag_phaser.py script that is pa
 
 ### Installation
 
-To ensure reproducible output, we have provided a "yaml" file that can be used to create a virtual environment suitable to run MAGPhase. You will still need to install cDNA_cupcake as part of that environment before using the workflow. Here is an example of how to accomplish this using the [miniConda](https://docs.conda.io/en/latest/miniconda.html) package manager:
+To ensure reproducible output, we have provided a "yaml" file that can be used to create a virtual environment suitable to run MAGPhase. You will still need to install MagPhase as part of that environment before using the workflow. Here is an example of how to accomplish this using the [miniConda](https://docs.conda.io/en/latest/miniconda.html) package manager:
 
 ```bash
 # This creates the environment
@@ -25,14 +25,15 @@ conda env create -f magphase.yaml
 # Now you must activate the environment
 conda activate magphase
 
-# Finally, download and install cDNA_cupcake 
-git clone https://github.com/Magdoll/cDNA_Cupcake.git
-cd cDNA_Cupcake
+# Finally, install MAGPhase
+cd MagPhase
 python setup.py build
 python setup.py install
 
 # You should be all set! Remember to activate the environment before running this workflow in the future!
 ```
+**Note:** The magphase.yaml file included in this directory includes all of the requirements for [MAGPhase](https://github.com/Magdoll/MagPhase) as well, so you only need to install this environment if you want to use our workflow in tandem with the MAGPhase algorithm
+
 ---
 ### Input
 

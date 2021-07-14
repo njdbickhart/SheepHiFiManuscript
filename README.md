@@ -2,6 +2,15 @@
 
 A collection of scripts and workflows to analyze HiFi assembled metagenomes. Each folder contains workflows and scripts designed to interrogate metagenome assembly data as demonstrated in our [preprint publication](https://www.biorxiv.org/content/10.1101/2021.05.04.442591v1.abstract). 
 
+## Installation
+
+To clone this repository and the associated MAGPhase program, run the following command:
+
+```bash
+git clone --recursive https://github.com/njdbickhart/SheepHiFiManuscript.git
+```
+
+Each of the following folders has separate installation instructions and runtime requirements, so please consult the provided README files for more details. We tried to limit the use of external libraries and programs where possible, so these requirements shouldn't be too onerous! 
 
 ## Downsampling
 
