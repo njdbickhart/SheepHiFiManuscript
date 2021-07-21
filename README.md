@@ -1,5 +1,7 @@
 # SheepHiFiManuscript
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.5120910.svg)](https://doi.org/10.5281/zenodo.5120910)
+
 A collection of scripts and workflows to analyze HiFi assembled metagenomes. Each folder contains workflows and scripts designed to interrogate metagenome assembly data as demonstrated in our [preprint publication](https://www.biorxiv.org/content/10.1101/2021.05.04.442591v1.abstract). 
 
 ## Installation
